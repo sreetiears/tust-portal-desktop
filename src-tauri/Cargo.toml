@@ -1,6 +1,6 @@
 [package]
 name = "tust-portal-desktop"
-version = "0.1.1"
+version = "0.1.2"
 description = "天科大校园网自动登录"
 authors = ["oneepointer"]
 edition = "2021"
