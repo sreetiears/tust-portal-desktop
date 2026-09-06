@@ -1,3 +1,4 @@
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 use std::sync::Mutex;
 
@@ -5,6 +6,7 @@ static REGISTRY_MUTEX: Mutex<()> = Mutex::new(());
 
 pub fn is_enabled() -> bool {
     match Command::new("reg")
+        .creation_flags(0x08000000)
         .args([
             "query",
             r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
@@ -26,6 +28,7 @@ pub fn set_enabled(enabled: bool) -> Result<(), String> {
             .to_string_lossy()
             .to_string();
         Command::new("reg")
+            .creation_flags(0x08000000)
             .args([
                 "add", key, "/v", "TustPortal", "/t", "REG_SZ", "/d", &exe_path, "/f",
             ])
@@ -33,6 +36,7 @@ pub fn set_enabled(enabled: bool) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     } else {
         Command::new("reg")
+            .creation_flags(0x08000000)
             .args(["delete", key, "/v", "TustPortal", "/f"])
             .status()
             .map_err(|e| e.to_string())?;
@@ -46,6 +50,7 @@ mod tests {
 
     fn cleanup() {
         let _ = Command::new("reg")
+            .creation_flags(0x08000000)
             .args([
                 "delete",
                 r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",

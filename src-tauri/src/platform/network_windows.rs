@@ -1,7 +1,9 @@
+use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 pub(crate) fn get_wifi_ssid() -> Option<String> {
     let output = Command::new("netsh")
+        .creation_flags(0x08000000)
         .args(["wlan", "show", "interfaces"])
         .output()
         .ok()?;
@@ -10,13 +12,46 @@ pub(crate) fn get_wifi_ssid() -> Option<String> {
 }
 
 pub fn get_local_ipv4() -> Option<String> {
-    local_ip_address::local_ip().ok().map(|ip| ip.to_string())
+    let output = Command::new("ipconfig")
+        .creation_flags(0x08000000)
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_ipv4(&stdout)
 }
 
 pub fn get_local_ipv6() -> Option<String> {
-    let output = Command::new("ipconfig").output().ok()?;
+    let output = Command::new("ipconfig")
+        .creation_flags(0x08000000)
+        .output()
+        .ok()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     parse_ipv6(&stdout)
+}
+
+fn parse_ipv4(output: &str) -> Option<String> {
+    let mut fallback: Option<String> = None;
+    for line in output.lines() {
+        let line = line.trim();
+        if !line.contains("IPv4") {
+            continue;
+        }
+        if let Some((_, value)) = line.split_once(':') {
+            let value = value.trim();
+            if value.is_empty() || value.starts_with("127.") {
+                continue;
+            }
+            // Campus network (TUST) uses 10.x.x.x — prioritize it
+            if value.starts_with("10.") {
+                return Some(value.to_string());
+            }
+            // Remember first non-loopback as fallback
+            if fallback.is_none() {
+                fallback = Some(value.to_string());
+            }
+        }
+    }
+    fallback
 }
 
 fn parse_ipv6(output: &str) -> Option<String> {
@@ -133,5 +168,38 @@ mod tests {
             \u{0020}   IPv4 地址 . . . . . . . . . . . . : 10.59.16.97\n";
 
         assert_eq!(parse_ipv6(output), None);
+    }
+
+    #[test]
+    fn prioritizes_10x_ipv4_over_other_adapters() {
+        // Simulates a machine with VMware (26.x) before WiFi (10.x)
+        let output = "\n\
+            以太网适配器 VMware Network Adapter VMnet8:\n\
+            \u{0020}   IPv4 地址 . . . . . . . . . . . . : 26.64.198.138\n\
+            \u{0020}   子网掩码  . . . . . . . . . . . . : 255.255.255.0\n\
+            \n\
+            无线局域网适配器 WLAN:\n\
+            \u{0020}   IPv4 地址 . . . . . . . . . . . . : 10.59.16.97\n\
+            \u{0020}   子网掩码  . . . . . . . . . . . . : 255.255.0.0\n";
+
+        assert_eq!(parse_ipv4(output), Some("10.59.16.97".to_string()));
+    }
+
+    #[test]
+    fn returns_first_non_loopback_when_no_10x_present() {
+        let output = "\n\
+            无线局域网适配器 WLAN:\n\
+            \u{0020}   IPv4 地址 . . . . . . . . . . . . : 192.168.1.100\n";
+
+        assert_eq!(parse_ipv4(output), Some("192.168.1.100".to_string()));
+    }
+
+    #[test]
+    fn skips_loopback_ipv4() {
+        let output = "\n\
+            以太网适配器 本地连接:\n\
+            \u{0020}   IPv4 地址 . . . . . . . . . . . . : 127.0.0.1\n";
+
+        assert_eq!(parse_ipv4(output), None);
     }
 }
